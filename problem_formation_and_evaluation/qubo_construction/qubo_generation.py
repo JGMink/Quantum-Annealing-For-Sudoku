@@ -1,454 +1,492 @@
-import numpy as np # type: ignore
-from itertools import combinations
+import numpy as np
 
-def bit_index(residue_idx, position_idx, num_positions):
-    """Convert (residue, position) to bit index."""
-    return residue_idx * num_positions + position_idx
-
-def decode_bit_index(bit_idx, num_positions):
-    """Convert bit index to (residue, position)."""
-    residue_idx = bit_idx // num_positions
-    position_idx = bit_idx % num_positions
-    return residue_idx, position_idx
-
-# ============================================================================
-# E_MJ: Miyazawa-Jernigan Interaction Energy
-# ============================================================================
-
-def build_E_MJ(chain, adj, interaction_matrix):
+def build_sudoku_qubo(N, box_size, givens=None, L1=1.0, L2=1.0, L3=1.0, L4=1.0):
     """
-    Build Q_MJ matrix and polynomial for Miyazawa-Jernigan interactions.
+    Build QUBO matrix for Sudoku puzzle
     
-    E_MJ = -sum_{|i-j|>1} C(a_i, a_j) * sum_{<n,m>} b_{i,n} * b_{j,m}
+    Args:
+        N: Size of Sudoku (4 for 4x4, 9 for 9x9)
+        box_size: Size of each box (2 for 4x4, 3 for 9x9)
+        givens: Dictionary {(i,j): digit} for known cells (1-indexed digits)
+                If None, builds unconstrained QUBO
+        L1, L2, L3, L4: Lagrange multipliers for constraints
     
     Returns:
-        Q_MJ: numpy array (num_bits x num_bits)
-        polynomial: list of (coefficient, bit_i, bit_j) tuples
-        constant: constant offset
+        Q: QUBO matrix of shape (N³, N³)
+        var_to_idx: Dictionary mapping (i,j,k) to bitstring index
+        idx_to_var: Dictionary mapping bitstring index to (i,j,k)
+        constant_offset: Constant term to add to energy
     """
-    num_residues = len(chain)
-    num_positions = adj.shape[0]
-    num_bits = num_residues * num_positions
+    # Total number of binary variables
+    n_vars = N * N * N
     
-    Q_MJ = np.zeros((num_bits, num_bits))
-    polynomial = []
+    # Initialize QUBO matrix
+    Q = np.zeros((n_vars, n_vars))
     
-    # Iterate over non-consecutive residue pairs
-    for i in range(num_residues):
-        for j in range(i + 2, num_residues):  # |i-j| > 1
-            # Get interaction energy
-            interaction = interaction_matrix.get((chain[i], chain[j]), 0)
-            if interaction == 0:
+    # Initialize constant offset
+    constant_offset = 0.0
+    
+    # Create index mappings
+    var_to_idx = {}
+    idx_to_var = {}
+    idx = 0
+    for i in range(N):
+        for j in range(N):
+            for k in range(N):
+                var_to_idx[(i, j, k)] = idx
+                idx_to_var[idx] = (i, j, k)
+                idx += 1
+    
+    # Helper function to add quadratic term to Q
+    def add_quadratic(var1, var2, coeff):
+        idx1 = var_to_idx[var1]
+        idx2 = var_to_idx[var2]
+        if idx1 <= idx2:
+            Q[idx1, idx2] += coeff
+        else:
+            Q[idx2, idx1] += coeff
+    
+    # Helper function to add linear term to Q (diagonal)
+    def add_linear(var, coeff):
+        idx = var_to_idx[var]
+        Q[idx, idx] += coeff
+    
+    # ===== E1: Each cell has exactly one digit =====
+    # E1 = Σ(i,j) [Σk x[i,j,k] - 1]²
+    #    = Σ(i,j) [-Σk x[i,j,k] + 2Σ(k<k') x[i,j,k]x[i,j,k'] + 1]
+    
+    for i in range(N):
+        for j in range(N):
+            # If this cell is given, add constant penalty of 0 (constraint satisfied)
+            if givens and (i, j) in givens:
+                constant_offset += 0  # Constraint automatically satisfied
                 continue
             
-            # Apply negative sign from E_MJ formula
-            coeff = -interaction
+            # Linear terms: -x[i,j,k]
+            for k in range(N):
+                add_linear((i, j, k), -L1)
             
-            # For each pair of adjacent positions
-            for n in range(num_positions):
-                for m in range(num_positions):
-                    if adj[n, m] == 1:  # Positions n and m are adjacent
-                        bit_i = bit_index(i, n, num_positions)
-                        bit_j = bit_index(j, m, num_positions)
-                        
-                        # Add to Q matrix (upper triangular)
-                        if bit_i < bit_j:
-                            Q_MJ[bit_i, bit_j] += coeff
-                        else:
-                            Q_MJ[bit_j, bit_i] += coeff
-                        
-                        # Add to polynomial
-                        polynomial.append((coeff, bit_i, bit_j))
+            # Quadratic terms: 2*x[i,j,k]*x[i,j,k']
+            for k in range(N):
+                for kp in range(k + 1, N):
+                    add_quadratic((i, j, k), (i, j, kp), 2 * L1)
+            
+            # Constant: +1
+            constant_offset += L1
     
-    constant = 0
-    return Q_MJ, polynomial, constant
-
-
-def print_E_MJ_details(chain, adj, interaction_matrix):
-    """Print detailed breakdown of E_MJ construction."""
-    num_residues = len(chain)
-    num_positions = adj.shape[0]
+    # ===== E2: Each row has each digit exactly once =====
+    # E2 = Σ(i,k) [Σj x[i,j,k] - 1]²
+    # When some cells are given, we need: [Σj(free) x[i,j,k] + count_given - 1]²
     
-    print("="*70)
-    print("E_MJ: Miyazawa-Jernigan Interaction Energy")
-    print("="*70)
-    print(f"Formula: E_MJ = -sum_{{|i-j|>1}} C(a_i, a_j) * sum_{{<n,m>}} b_{{i,n}} * b_{{j,m}}")
-    print()
+    for i in range(N):
+        for k in range(N):
+            # Count how many cells in this row already have digit k (from givens)
+            given_count = 0
+            free_cells = []
+            
+            for j in range(N):
+                if givens and (i, j) in givens:
+                    if givens[(i, j)] == k + 1:  # k is 0-indexed, givens are 1-indexed
+                        given_count += 1
+                else:
+                    free_cells.append(j)
+            
+            # If already satisfied by givens, skip
+            if given_count == 1 and len(free_cells) == 0:
+                constant_offset += 0
+                continue
+            
+            # Expand: [Σj(free) x[i,j,k] + given_count - 1]²
+            # = [Σj(free) x[i,j,k] - (1 - given_count)]²
+            # = Σj x² - 2(1-given_count)Σj x + 2Σ(j<j') x*x' + (1-given_count)²
+            
+            target_adjustment = 1 - given_count
+            
+            # Linear terms: (1 - 2*target_adjustment)*x[i,j,k]
+            for j in free_cells:
+                add_linear((i, j, k), L2 * (1 - 2 * target_adjustment))
+            
+            # Quadratic terms: 2*x[i,j,k]*x[i,j',k]
+            for j_idx, j in enumerate(free_cells):
+                for jp in free_cells[j_idx + 1:]:
+                    add_quadratic((i, j, k), (i, jp, k), 2 * L2)
+            
+            # Constant: target_adjustment²
+            constant_offset += L2 * (target_adjustment ** 2)
     
-    # Find non-consecutive pairs with non-zero interactions
-    print("Non-consecutive residue pairs:")
-    for i in range(num_residues):
-        for j in range(i + 2, num_residues):
-            interaction = interaction_matrix.get((chain[i], chain[j]), 0)
-            print(f"  Pair ({i}, {j}): {chain[i]} and {chain[j]} -> C = {interaction}")
-    print()
+    # ===== E3: Each column has each digit exactly once =====
+    # E3 = Σ(j,k) [Σi x[i,j,k] - 1]²
     
-    # Build matrix
-    Q_MJ, polynomial, constant = build_E_MJ(chain, adj, interaction_matrix)
+    for j in range(N):
+        for k in range(N):
+            # Count how many cells in this column already have digit k (from givens)
+            given_count = 0
+            free_cells = []
+            
+            for i in range(N):
+                if givens and (i, j) in givens:
+                    if givens[(i, j)] == k + 1:
+                        given_count += 1
+                else:
+                    free_cells.append(i)
+            
+            # If already satisfied by givens, skip
+            if given_count == 1 and len(free_cells) == 0:
+                constant_offset += 0
+                continue
+            
+            target_adjustment = 1 - given_count
+            
+            # Linear terms
+            for i in free_cells:
+                add_linear((i, j, k), L3 * (1 - 2 * target_adjustment))
+            
+            # Quadratic terms
+            for i_idx, i in enumerate(free_cells):
+                for ip in free_cells[i_idx + 1:]:
+                    add_quadratic((i, j, k), (ip, j, k), 2 * L3)
+            
+            # Constant
+            constant_offset += L3 * (target_adjustment ** 2)
     
-    print(f"Q_MJ Matrix ({Q_MJ.shape[0]}x{Q_MJ.shape[1]}):")
-    print(Q_MJ)
-    print()
+    # ===== E4: Each box has each digit exactly once =====
+    # E4 = Σ(box,k) [Σ(i,j in box) x[i,j,k] - 1]²
     
-    print(f"Non-zero entries in Q_MJ:")
-    for i in range(Q_MJ.shape[0]):
-        for j in range(i, Q_MJ.shape[1]):
-            if Q_MJ[i, j] != 0:
-                res_i, pos_i = decode_bit_index(i, num_positions)
-                res_j, pos_j = decode_bit_index(j, num_positions)
-                print(f"  Q[{i:2d}, {j:2d}] = {Q_MJ[i,j]:+.1f}  (b_{{{res_i},{pos_i}}} * b_{{{res_j},{pos_j}}})")
-    print()
+    boxes_per_side = N // box_size
     
-    print(f"Polynomial (showing first 10 terms):")
-    print("E_MJ = ", end="")
-    for idx, (coeff, bit_i, bit_j) in enumerate(polynomial[:10]):
-        res_i, pos_i = decode_bit_index(bit_i, num_positions)
-        res_j, pos_j = decode_bit_index(bit_j, num_positions)
-        if idx > 0:
-            print(f"       {coeff:+.1f} * b_{{{res_i},{pos_i}}} * b_{{{res_j},{pos_j}}}")
-        else:
-            print(f"{coeff:+.1f} * b_{{{res_i},{pos_i}}} * b_{{{res_j},{pos_j}}}")
-    if len(polynomial) > 10:
-        print(f"       ... ({len(polynomial) - 10} more terms)")
-    print()
-    
-    return Q_MJ, polynomial, constant
-
-
-# ============================================================================
-# E1: One Site Per Amino Acid
-# ============================================================================
-
-def build_E1(chain, num_positions):
-    """
-    Build Q_E1 matrix and polynomial.
-    
-    E1 = sum_i (sum_n b_{i,n} - 1)^2
-       = sum_i [-sum_n b_{i,n} + 2*sum_{n<m} b_{i,n}*b_{i,m} + 1]
-    
-    Returns:
-        Q_E1: numpy array (num_bits x num_bits)
-        polynomial: list of (coefficient, bit_i, bit_j) tuples
-        constant: constant offset
-    """
-    num_residues = len(chain)
-    num_bits = num_residues * num_positions
-    
-    Q_E1 = np.zeros((num_bits, num_bits))
-    polynomial = []
-    constant = 0
-    
-    for i in range(num_residues):
-        # Diagonal terms: -1 for each position
-        for n in range(num_positions):
-            bit_idx = bit_index(i, n, num_positions)
-            Q_E1[bit_idx, bit_idx] += -1
-            polynomial.append((-1, bit_idx, bit_idx))
-        
-        # Off-diagonal terms: +2 for each pair of positions within same residue
-        for n in range(num_positions):
-            for m in range(n + 1, num_positions):
-                bit_n = bit_index(i, n, num_positions)
-                bit_m = bit_index(i, m, num_positions)
-                Q_E1[bit_n, bit_m] += 2
-                polynomial.append((2, bit_n, bit_m))
-        
-        # Constant: +1 per residue
-        constant += 1
-    
-    return Q_E1, polynomial, constant
-
-
-def print_E1_details(chain, num_positions):
-    """Print detailed breakdown of E1 construction."""
-    num_residues = len(chain)
-    
-    print("="*70)
-    print("E1: One Site Per Amino Acid")
-    print("="*70)
-    print(f"Formula: E1 = sum_i (sum_n b_{{i,n}} - 1)^2")
-    print()
-    
-    Q_E1, polynomial, constant = build_E1(chain, num_positions)
-    
-    print(f"Q_E1 Matrix ({Q_E1.shape[0]}x{Q_E1.shape[1]}):")
-    print(Q_E1)
-    print()
-    
-    print(f"Diagonal entries (linear terms):")
-    for i in range(Q_E1.shape[0]):
-        if Q_E1[i, i] != 0:
-            res_i, pos_i = decode_bit_index(i, num_positions)
-            print(f"  Q[{i:2d}, {i:2d}] = {Q_E1[i,i]:+.1f}  (b_{{{res_i},{pos_i}}})")
-    print()
-    
-    print(f"Off-diagonal entries (quadratic terms, showing first 10):")
-    count = 0
-    for i in range(Q_E1.shape[0]):
-        for j in range(i+1, Q_E1.shape[1]):
-            if Q_E1[i, j] != 0:
-                res_i, pos_i = decode_bit_index(i, num_positions)
-                res_j, pos_j = decode_bit_index(j, num_positions)
-                print(f"  Q[{i:2d}, {j:2d}] = {Q_E1[i,j]:+.1f}  (b_{{{res_i},{pos_i}}} * b_{{{res_j},{pos_j}}})")
-                count += 1
-                if count >= 10:
-                    break
-        if count >= 10:
-            break
-    
-    # Count total off-diagonal
-    total_off_diag = np.sum(Q_E1 != 0) - num_residues * num_positions
-    if total_off_diag > 10:
-        print(f"  ... ({total_off_diag - 10} more off-diagonal terms)")
-    print()
-    
-    print(f"Constant: {constant}")
-    print()
-    
-    return Q_E1, polynomial, constant
-
-
-# ============================================================================
-# E2: Self-Avoidance (One Residue Per Position)
-# ============================================================================
-
-def build_E2(chain, num_positions):
-    """
-    Build Q_E2 matrix and polynomial.
-    
-    E2 = (1/2) * sum_n sum_{i!=j} b_{i,n} * b_{j,n}
-       = sum_n sum_{i<j} b_{i,n} * b_{j,n}
-
-    Implementation: We count site_occupancy*(site_occupancy-1) which gives
-    the number of ordered pairs, then multiply by 0.5 to get the formula result.
-    
-    Returns:
-        Q_E2: numpy array (num_bits x num_bits)
-        polynomial: list of (coefficient, bit_i, bit_j) tuples
-        constant: constant offset
-
-        note: since b^2 = b for binary variables, any permutations wont show up at separate or multiplied terms
-        Ex. since we have b_{0,1} * b_{1,1}, we'd technically also have b_{1,1} * b_{0,1}, but we'd just combine them, which evaluates to the same thing.
-    """
-    num_residues = len(chain)
-    num_bits = num_residues * num_positions
-    
-    Q_E2 = np.zeros((num_bits, num_bits))
-    polynomial = []
-    
-    # For each position
-    for n in range(num_positions):
-        # For each pair of residues at that position
-        for i in range(num_residues):
-            for j in range(i + 1, num_residues):
-                bit_i = bit_index(i, n, num_positions)
-                bit_j = bit_index(j, n, num_positions)
+    for box_row in range(boxes_per_side):
+        for box_col in range(boxes_per_side):
+            for k in range(N):
+                # Count how many cells in this box already have digit k (from givens)
+                given_count = 0
+                free_cells = []
                 
-                # Add 1 to Q matrix (using i<j ordering eliminates need for 1/2 factor)
-                Q_E2[bit_i, bit_j] += 1
-
-                # Polynomial stores 0.5 for documentation (standard formula form)
-                polynomial.append((0.5, bit_i, bit_j))
+                for i in range(box_row * box_size, (box_row + 1) * box_size):
+                    for j in range(box_col * box_size, (box_col + 1) * box_size):
+                        if givens and (i, j) in givens:
+                            if givens[(i, j)] == k + 1:
+                                given_count += 1
+                        else:
+                            free_cells.append((i, j))
+                
+                # If already satisfied by givens, skip
+                if given_count == 1 and len(free_cells) == 0:
+                    constant_offset += 0
+                    continue
+                
+                target_adjustment = 1 - given_count
+                
+                # Linear terms
+                for (i, j) in free_cells:
+                    add_linear((i, j, k), L4 * (1 - 2 * target_adjustment))
+                
+                # Quadratic terms
+                for cell_idx, (i, j) in enumerate(free_cells):
+                    for (ip, jp) in free_cells[cell_idx + 1:]:
+                        add_quadratic((i, j, k), (ip, jp, k), 2 * L4)
+                
+                # Constant
+                constant_offset += L4 * (target_adjustment ** 2)
     
-    constant = 0
-    return Q_E2, polynomial, constant
-
-
-def print_E2_details(chain, num_positions):
-    """Print detailed breakdown of E2 construction."""
-    num_residues = len(chain)
-    
-    print("="*70)
-    print("E2: Self-Avoidance (One Residue Per Position)")
-    print("="*70)
-    print(f"Formula: E2 = (1/2) * sum_n sum_{{i!=j}} b_{{i,n}} * b_{{j,n}}")
-    print()
-    
-    Q_E2, polynomial, constant = build_E2(chain, num_positions)
-    
-    print(f"Q_E2 Matrix ({Q_E2.shape[0]}x{Q_E2.shape[1]}):")
-    print(Q_E2)
-    print()
-    
-    print(f"Off-diagonal entries (showing first 10):")
-    count = 0
-    for i in range(Q_E2.shape[0]):
-        for j in range(i+1, Q_E2.shape[1]):
-            if Q_E2[i, j] != 0:
-                res_i, pos_i = decode_bit_index(i, num_positions)
-                res_j, pos_j = decode_bit_index(j, num_positions)
-                print(f"  Q[{i:2d}, {j:2d}] = {Q_E2[i,j]:+.1f}  (b_{{{res_i},{pos_i}}} * b_{{{res_j},{pos_j}}})")
-                count += 1
-                if count >= 10:
-                    break
-        if count >= 10:
-            break
-    
-    total_off_diag = np.sum(Q_E2 != 0)
-    if total_off_diag > 10:
-        print(f"  ... ({total_off_diag - 10} more off-diagonal terms)")
-    print()
-    
-    print(f"Note: All diagonal entries are 0 (E2 is purely quadratic)")
-    print(f"Constant: {constant}")
-    print()
-    
-    return Q_E2, polynomial, constant
+    return Q, var_to_idx, idx_to_var, constant_offset
 
 
-# ============================================================================
-# E3: Chain Connectivity
-# ============================================================================
-
-def build_E3(chain, adj):
+def build_E1(N, givens=None, L1=1.0):
     """
-    Build Q_E3 matrix and polynomial.
+    Build E1 component: Each cell has exactly one digit
+    Returns Q matrix, polynomial terms, and constant
+    """
+    n_vars = N * N * N
+    Q = np.zeros((n_vars, n_vars))
+    polynomial_terms = []
+    constant = 0.0
     
-    E3 = sum_{i=1}^{N-1} sum_n b_{i,n} sum_{||m-n||>1} b_{i+1,m}
+    # Create index mapping
+    var_to_idx = {}
+    idx = 0
+    for i in range(N):
+        for j in range(N):
+            for k in range(N):
+                var_to_idx[(i, j, k)] = idx
+                idx += 1
     
-    This penalizes consecutive residues that are NOT at adjacent positions.
+    for i in range(N):
+        for j in range(N):
+            if givens and (i, j) in givens:
+                continue
+            
+            # Linear terms
+            for k in range(N):
+                idx = var_to_idx[(i, j, k)]
+                Q[idx, idx] += -L1
+                polynomial_terms.append(f"-{L1}*x[{i},{j},{k}]")
+            
+            # Quadratic terms
+            for k in range(N):
+                for kp in range(k + 1, N):
+                    idx1 = var_to_idx[(i, j, k)]
+                    idx2 = var_to_idx[(i, j, kp)]
+                    Q[idx1, idx2] += 2 * L1
+                    polynomial_terms.append(f"+{2*L1}*x[{i},{j},{k}]*x[{i},{j},{kp}]")
+            
+            constant += L1
+    
+    return Q, polynomial_terms, constant
+
+
+def build_E2(N, givens=None, L2=1.0):
+    """
+    Build E2 component: Each row has each digit exactly once
+    Returns Q matrix, polynomial terms, and constant
+    """
+    n_vars = N * N * N
+    Q = np.zeros((n_vars, n_vars))
+    polynomial_terms = []
+    constant = 0.0
+    
+    var_to_idx = {}
+    idx = 0
+    for i in range(N):
+        for j in range(N):
+            for k in range(N):
+                var_to_idx[(i, j, k)] = idx
+                idx += 1
+    
+    for i in range(N):
+        for k in range(N):
+            given_count = 0
+            free_cells = []
+            
+            for j in range(N):
+                if givens and (i, j) in givens:
+                    if givens[(i, j)] == k + 1:
+                        given_count += 1
+                else:
+                    free_cells.append(j)
+            
+            if given_count == 1 and len(free_cells) == 0:
+                continue
+            
+            target_adjustment = 1 - given_count
+            
+            # Linear terms
+            for j in free_cells:
+                idx = var_to_idx[(i, j, k)]
+                Q[idx, idx] += L2 * (1 - 2 * target_adjustment)
+                polynomial_terms.append(f"{L2 * (1 - 2 * target_adjustment)}*x[{i},{j},{k}]")
+            
+            # Quadratic terms
+            for j_idx, j in enumerate(free_cells):
+                for jp in free_cells[j_idx + 1:]:
+                    idx1 = var_to_idx[(i, j, k)]
+                    idx2 = var_to_idx[(i, jp, k)]
+                    Q[idx1, idx2] += 2 * L2
+                    polynomial_terms.append(f"+{2*L2}*x[{i},{j},{k}]*x[{i},{jp},{k}]")
+            
+            constant += L2 * (target_adjustment ** 2)
+    
+    return Q, polynomial_terms, constant
+
+
+def build_E3(N, givens=None, L3=1.0):
+    """
+    Build E3 component: Each column has each digit exactly once
+    Returns Q matrix, polynomial terms, and constant
+    """
+    n_vars = N * N * N
+    Q = np.zeros((n_vars, n_vars))
+    polynomial_terms = []
+    constant = 0.0
+    
+    var_to_idx = {}
+    idx = 0
+    for i in range(N):
+        for j in range(N):
+            for k in range(N):
+                var_to_idx[(i, j, k)] = idx
+                idx += 1
+    
+    for j in range(N):
+        for k in range(N):
+            given_count = 0
+            free_cells = []
+            
+            for i in range(N):
+                if givens and (i, j) in givens:
+                    if givens[(i, j)] == k + 1:
+                        given_count += 1
+                else:
+                    free_cells.append(i)
+            
+            if given_count == 1 and len(free_cells) == 0:
+                continue
+            
+            target_adjustment = 1 - given_count
+            
+            # Linear terms
+            for i in free_cells:
+                idx = var_to_idx[(i, j, k)]
+                Q[idx, idx] += L3 * (1 - 2 * target_adjustment)
+                polynomial_terms.append(f"{L3 * (1 - 2 * target_adjustment)}*x[{i},{j},{k}]")
+            
+            # Quadratic terms
+            for i_idx, i in enumerate(free_cells):
+                for ip in free_cells[i_idx + 1:]:
+                    idx1 = var_to_idx[(i, j, k)]
+                    idx2 = var_to_idx[(ip, j, k)]
+                    Q[idx1, idx2] += 2 * L3
+                    polynomial_terms.append(f"+{2*L3}*x[{i},{j},{k}]*x[{ip},{j},{k}]")
+            
+            constant += L3 * (target_adjustment ** 2)
+    
+    return Q, polynomial_terms, constant
+
+
+def build_E4(N, box_size, givens=None, L4=1.0):
+    """
+    Build E4 component: Each box has each digit exactly once
+    Returns Q matrix, polynomial terms, and constant
+    """
+    n_vars = N * N * N
+    Q = np.zeros((n_vars, n_vars))
+    polynomial_terms = []
+    constant = 0.0
+    
+    var_to_idx = {}
+    idx = 0
+    for i in range(N):
+        for j in range(N):
+            for k in range(N):
+                var_to_idx[(i, j, k)] = idx
+                idx += 1
+    
+    boxes_per_side = N // box_size
+    
+    for box_row in range(boxes_per_side):
+        for box_col in range(boxes_per_side):
+            for k in range(N):
+                given_count = 0
+                free_cells = []
+                
+                for i in range(box_row * box_size, (box_row + 1) * box_size):
+                    for j in range(box_col * box_size, (box_col + 1) * box_size):
+                        if givens and (i, j) in givens:
+                            if givens[(i, j)] == k + 1:
+                                given_count += 1
+                        else:
+                            free_cells.append((i, j))
+                
+                if given_count == 1 and len(free_cells) == 0:
+                    continue
+                
+                target_adjustment = 1 - given_count
+                
+                # Linear terms
+                for (i, j) in free_cells:
+                    idx = var_to_idx[(i, j, k)]
+                    Q[idx, idx] += L4 * (1 - 2 * target_adjustment)
+                    polynomial_terms.append(f"{L4 * (1 - 2 * target_adjustment)}*x[{i},{j},{k}]")
+                
+                # Quadratic terms
+                for cell_idx, (i, j) in enumerate(free_cells):
+                    for (ip, jp) in free_cells[cell_idx + 1:]:
+                        idx1 = var_to_idx[(i, j, k)]
+                        idx2 = var_to_idx[(ip, jp, k)]
+                        Q[idx1, idx2] += 2 * L4
+                        polynomial_terms.append(f"+{2*L4}*x[{i},{j},{k}]*x[{ip},{jp},{k}]")
+                
+                constant += L4 * (target_adjustment ** 2)
+    
+    return Q, polynomial_terms, constant
+
+
+def print_E1_details(N, givens=None, L1=1.0):
+    """Print detailed construction of E1 component"""
+    Q, terms, const = build_E1(N, givens, L1)
+    print(f"E1: Each cell has exactly one digit")
+    print(f"  Number of terms: {len(terms)}")
+    print(f"  Constant: {const}")
+    print(f"  Sample terms: {terms[:5] if len(terms) > 5 else terms}")
+    return Q, terms, const
+
+
+def print_E2_details(N, givens=None, L2=1.0):
+    """Print detailed construction of E2 component"""
+    Q, terms, const = build_E2(N, givens, L2)
+    print(f"E2: Each row has each digit exactly once")
+    print(f"  Number of terms: {len(terms)}")
+    print(f"  Constant: {const}")
+    print(f"  Sample terms: {terms[:5] if len(terms) > 5 else terms}")
+    return Q, terms, const
+
+
+def print_E3_details(N, givens=None, L3=1.0):
+    """Print detailed construction of E3 component"""
+    Q, terms, const = build_E3(N, givens, L3)
+    print(f"E3: Each column has each digit exactly once")
+    print(f"  Number of terms: {len(terms)}")
+    print(f"  Constant: {const}")
+    print(f"  Sample terms: {terms[:5] if len(terms) > 5 else terms}")
+    return Q, terms, const
+
+
+def print_E4_details(N, box_size, givens=None, L4=1.0):
+    """Print detailed construction of E4 component"""
+    Q, terms, const = build_E4(N, box_size, givens, L4)
+    print(f"E4: Each box has each digit exactly once")
+    print(f"  Number of terms: {len(terms)}")
+    print(f"  Constant: {const}")
+    print(f"  Sample terms: {terms[:5] if len(terms) > 5 else terms}")
+    return Q, terms, const
+
+
+def evaluate_qubo(Q, bitstring, constant_offset=0):
+    """
+    Evaluate QUBO energy for a given bitstring
+    
+    Args:
+        Q: QUBO matrix
+        bitstring: Binary string or list of 0/1 values
+        constant_offset: Constant to add to energy
     
     Returns:
-        Q_E3: numpy array (num_bits x num_bits)
-        polynomial: list of (coefficient, bit_i, bit_j) tuples
-        constant: constant offset
+        Energy value
     """
-    num_residues = len(chain)
-    num_positions = adj.shape[0]
-    num_bits = num_residues * num_positions
+    x = np.array([int(b) for b in bitstring])
     
-    Q_E3 = np.zeros((num_bits, num_bits))
-    polynomial = []
+    # E = x^T Q x + constant
+    # For upper triangular Q: E = Σi Q[i,i]*x[i]² + 2*Σ(i<j) Q[i,j]*x[i]*x[j]
+    energy = 0.0
     
-    # Build non-adjacency matrix (excluding diagonal)
-    non_adj = 1 - adj - np.eye(num_positions)
+    # Diagonal terms
+    for i in range(len(x)):
+        energy += Q[i, i] * x[i]
     
-    # For each consecutive residue pair
-    for i in range(num_residues - 1):
-        # For each pair of non-adjacent positions (n, m)
-        for n in range(num_positions):
-            for m in range(num_positions):
-                if non_adj[n, m] == 1:  # Positions n and m are NOT adjacent
-                    bit_i = bit_index(i, n, num_positions)
-                    bit_j = bit_index(i + 1, m, num_positions)
-                    
-                    # Add to Q matrix (upper triangular)
-                    if bit_i < bit_j:
-                        Q_E3[bit_i, bit_j] += 1
-                    else:
-                        Q_E3[bit_j, bit_i] += 1
-                    
-                    # Add to polynomial
-                    polynomial.append((1, bit_i, bit_j))
+    # Off-diagonal terms (Q is upper triangular)
+    for i in range(len(x)):
+        for j in range(i + 1, len(x)):
+            energy += 2 * Q[i, j] * x[i] * x[j]
     
-    constant = 0
-    return Q_E3, polynomial, constant
+    return energy + constant_offset
 
-
-def print_E3_details(chain, adj):
-    """Print detailed breakdown of E3 construction."""
-    num_residues = len(chain)
-    num_positions = adj.shape[0]
+def print_qubo_stats(Q, N, givens=None):
+    """Print statistics about the QUBO matrix"""
+    n_vars = N * N * N
     
-    print("="*70)
-    print("E3: Chain Connectivity")
-    print("="*70)
-    print(f"Formula: E3 = sum_{{i=1}}^{{N-1}} sum_n b_{{i,n}} sum_{{||m-n||>1}} b_{{i+1,m}}")
-    print()
-    print("This penalizes consecutive residues at NON-adjacent positions.")
-    print()
+    print(f"\nQUBO Matrix Statistics:")
+    print(f"  Size: {n_vars} × {n_vars}")
+    print(f"  Total possible entries: {n_vars * n_vars:,}")
     
-    # Show non-adjacent position pairs
-    non_adj = 1 - adj - np.eye(num_positions)
-    print("Non-adjacent position pairs:")
-    for n in range(num_positions):
-        for m in range(num_positions):
-            if non_adj[n, m] == 1:
-                print(f"  Positions {n} and {m} are NOT adjacent")
-    print()
+    # Count non-zero entries
+    nonzero_diag = np.count_nonzero(np.diag(Q))
+    nonzero_upper = np.count_nonzero(np.triu(Q, k=1))
+    total_nonzero = nonzero_diag + nonzero_upper
     
-    print(f"Consecutive residue pairs: {num_residues - 1}")
-    for i in range(num_residues - 1):
-        print(f"  Pair ({i}, {i+1}): {chain[i]} -> {chain[i+1]}")
-    print()
+    print(f"  Non-zero diagonal entries: {nonzero_diag}")
+    print(f"  Non-zero off-diagonal entries: {nonzero_upper}")
+    print(f"  Total non-zero entries: {total_nonzero}")
+    print(f"  Sparsity: {100 * (1 - total_nonzero / (n_vars * n_vars)):.2f}%")
     
-    Q_E3, polynomial, constant = build_E3(chain, adj)
-    
-    print(f"Q_E3 Matrix ({Q_E3.shape[0]}x{Q_E3.shape[1]}):")
-    print(Q_E3)
-    print()
-    
-    print(f"Non-zero entries in Q_E3:")
-    for i in range(Q_E3.shape[0]):
-        for j in range(i, Q_E3.shape[1]):
-            if Q_E3[i, j] != 0:
-                res_i, pos_i = decode_bit_index(i, num_positions)
-                res_j, pos_j = decode_bit_index(j, num_positions)
-                print(f"  Q[{i:2d}, {j:2d}] = {Q_E3[i,j]:+.1f}  (b_{{{res_i},{pos_i}}} * b_{{{res_j},{pos_j}}})  [res {res_i}->{res_j}, pos {pos_i}->{pos_j} non-adj]")
-    print()
-    
-    print(f"Total terms: {len(polynomial)}")
-    print(f"Constant: {constant}")
-    print()
-    
-    return Q_E3, polynomial, constant
-
-
-# ============================================================================
-# Main demonstration
-# ============================================================================
-
-if __name__ == "__main__":
-    # Example setup
-    chain = ['H', 'P', 'C', 'H']
-    adj = np.array([[0, 1, 1, 0],
-                    [1, 0, 0, 1],
-                    [1, 0, 0, 1],
-                    [0, 1, 1, 0]])
-    
-    C = {
-        ('H', 'H'): 1, ('C', 'C'): -1,
-        ('H', 'C'): 0, ('C', 'H'): 0,
-        ('H', 'P'): 0, ('P', 'H'): 0,
-        ('C', 'P'): 0, ('P', 'C'): 0,
-        ('P', 'P'): 0
-    }
-    
-    num_positions = adj.shape[0]
-    
-    print("\n" + "="*70)
-    print("QUBO FORMULATION FOR PROTEIN FOLDING")
-    print("="*70)
-    print(f"Chain: {chain}")
-    print(f"Number of positions: {num_positions}")
-    print(f"Total bits: {len(chain) * num_positions}")
-    print()
-    print("Position Adjacency Matrix:")
-    print(adj)
-    print()
-    
-    # Build and display E_MJ
-    Q_MJ, poly_MJ, const_MJ = print_E_MJ_details(chain, adj, C)
-    
-    # Build and display E1
-    Q_E1, poly_E1, const_E1 = print_E1_details(chain, num_positions)
-    
-    # Build and display E2
-    Q_E2, poly_E2, const_E2 = print_E2_details(chain, num_positions)
-    
-    # Build and display E3
-    Q_E3, poly_E3, const_E3 = print_E3_details(chain, adj)
-    
-    print("="*70)
-    print("SUMMARY")
-    print("="*70)
-    print(f"E_MJ: {len(poly_MJ)} terms, constant = {const_MJ}")
-    print(f"E1:   {len(poly_E1)} terms, constant = {const_E1}")
-    print(f"E2:   {len(poly_E2)} terms, constant = {const_E2}")
-    print(f"E3:   {len(poly_E3)} terms, constant = {const_E3}")
-    print()
-    
-    # Combined totals
-    total_terms = len(poly_MJ) + len(poly_E1) + len(poly_E2) + len(poly_E3)
-    total_constant = const_MJ + const_E1 + const_E2 + const_E3
-    print(f"TOTAL: {total_terms} terms, total constant = {total_constant}")
+    if givens:
+        print(f"\nGiven cells: {len(givens)}")
+        print(f"Free variables: {n_vars - len(givens) * N}")

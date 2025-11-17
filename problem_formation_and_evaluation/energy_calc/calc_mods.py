@@ -165,7 +165,6 @@ def grid_to_bitstring(grid, N):
                     bitstring += "0"
     return bitstring
 
-
 if __name__ == "__main__":
     N = 4  # 4x4 Sudoku
     box_size = 2
@@ -260,13 +259,6 @@ if __name__ == "__main__":
     # ---------+------
     # 1     2 | 3 4
     # 3     4 | 1 2
-    #
-    # Bitstring encoding:
-    # Cell (0,0): 1100 <- BOTH digit 1 and 2 active! (E1 violation)
-    # Cell (0,1): 0010 (digit 3)
-    # Cell (0,2): 0001 (digit 4)
-    # Cell (0,3): 0000 <- NO digit active! (E1 violation)
-    # Rest is valid...
     
     bitstring4 = (
         "1100" + "0010" + "0001" + "0000" +  # Row 0: {1,2},3,4,_ (E1 violations!)
