@@ -1,8 +1,9 @@
 """
-Enhanced Test Suite for Sudoku QUBO Construction
+Enhanced Test Suite for Sudoku QUBO Construction and Reduction
 
-This test suite validates the QUBO construction functions and demonstrates
-the variable elimination techniques for handling given cells (clues).
+This test suite validates both:
+1. Full QUBO construction (qubo_construction.py)
+2. Reduced QUBO with variable elimination (qubo_reduction.py)
 
 TESTS INCLUDED:
 ───────────────
@@ -21,7 +22,7 @@ Test 3: Blank 9×9 Sudoku (Construction Only)
   - Shows matrix size: 729×729
   - No energy evaluation (would need 729-bit string)
 
-Test 4: Reduced QUBO (Variable Elimination) ⭐ NEW
+Test 4: Reduced QUBO (Variable Elimination) ⭐
   - Compares two methods for building reduced QUBO:
     1. Extraction: Build 64×64, extract 32×32 submatrix
     2. Direct: Build 32×32 directly
@@ -43,21 +44,28 @@ For educational purposes, build_reduced_qubo() shows the process clearly.
 """
 
 import numpy as np
+
+# Import from construction module
 from qubo_generation import (
     build_E1,
     build_E2,
     build_E3,
     build_E4,
     build_sudoku_qubo,
-    build_reduced_qubo,
-    build_reduced_qubo_direct,
+    evaluate_qubo,
     print_E1_details,
     print_E2_details,
     print_E3_details,
     print_E4_details,
-    evaluate_qubo,
+)
+
+# Import from reduction module
+from matrix_reduction import (
+    build_reduced_qubo,
+    build_reduced_qubo_direct,
     evaluate_reduced_qubo,
     print_reduction_stats,
+    reconstruct_full_solution,
 )
 
 
@@ -153,7 +161,7 @@ def test_qubo_components(N, box_size, givens, bitstring, expected_results, test_
 
 
 def run_all_tests():
-    """Run all three test cases."""
+    """Run all test cases."""
     
     print("\n" + "="*80)
     print("RUNNING ALL QUBO TESTS")
@@ -209,72 +217,26 @@ def run_all_tests():
     print("="*80)
     print("TEST: Test 3: Blank 9×9 Sudoku (Construction Only)")
     print("="*80)
-    print("This test demonstrates that the construction scales to 9×9.")
-    print("We build the QUBO but don't evaluate a solution (729-bit string).")
     print()
     
     N3 = 9
     box_size3 = 3
     givens3 = None
     
-    print(f"Sudoku size: {N3}×{N3}")
-    print(f"Number of variables: {N3 * N3 * N3} = {N3**3}")
-    print(f"Givens: None (blank puzzle)")
-    print()
-    
-    # Just build to show it works
+    print(f"Building {N3}×{N3} Sudoku QUBO...")
     Q3, var_to_idx3, idx_to_var3, offset3 = build_sudoku_qubo(N3, box_size3, givens3)
     
-    n_vars = N3 * N3 * N3
-    nonzero_diag = np.count_nonzero(np.diag(Q3))
-    nonzero_upper = np.count_nonzero(np.triu(Q3, k=1))
-    total_nonzero = nonzero_diag + nonzero_upper
-    
-    print("QUBO Matrix Statistics:")
-    print(f"  Size: {n_vars} × {n_vars}")
-    print(f"  Total possible entries: {n_vars * n_vars:,}")
-    print(f"  Non-zero diagonal entries: {nonzero_diag:,}")
-    print(f"  Non-zero off-diagonal entries: {nonzero_upper:,}")
-    print(f"  Total non-zero entries: {total_nonzero:,}")
-    print(f"  Sparsity: {100 * (1 - total_nonzero / (n_vars * n_vars)):.2f}%")
+    print(f"  Matrix size: {Q3.shape[0]} × {Q3.shape[1]} = {Q3.shape[0] * Q3.shape[1]:,} entries")
+    print(f"  Number of variables: {len(var_to_idx3)}")
     print(f"  Constant offset: {offset3}")
+    print(f"  Non-zero entries: {np.count_nonzero(Q3):,}")
+    print(f"  Sparsity: {100 * (1 - np.count_nonzero(Q3) / (Q3.shape[0] * Q3.shape[1])):.2f}%")
     print()
-    print("✓ CONSTRUCTION SUCCESSFUL")
-    print()
-    
-    # ========================================================================
-    # Detailed construction for Test 1 (Blank 4×4)
-    # ========================================================================
-    print("="*80)
-    print("DETAILED CONSTRUCTION: Test 1 (Blank 4×4)")
-    print("="*80)
-    print(f"Sudoku: {N1}×{N1}")
-    print(f"Number of variables: {N1**3}")
-    print(f"Number of constraints: {4 * N1 * N1} (E1 + E2 + E3 + E4)")
-    print()
-    
-    Q_E1_1, poly_E1_1, const_E1_1 = print_E1_details(N1, None)
-    print()
-    Q_E2_1, poly_E2_1, const_E2_1 = print_E2_details(N1, None)
-    print()
-    Q_E3_1, poly_E3_1, const_E3_1 = print_E3_details(N1, None)
-    print()
-    Q_E4_1, poly_E4_1, const_E4_1 = print_E4_details(N1, box_size1, None)
-    print()
-    
-    print("="*80)
-    print("SUMMARY FOR TEST 1")
-    print("="*80)
-    print(f"E1: {len(poly_E1_1)} terms, constant = {const_E1_1}")
-    print(f"E2: {len(poly_E2_1)} terms, constant = {const_E2_1}")
-    print(f"E3: {len(poly_E3_1)} terms, constant = {const_E3_1}")
-    print(f"E4: {len(poly_E4_1)} terms, constant = {const_E4_1}")
-    print(f"Total terms: {len(poly_E1_1) + len(poly_E2_1) + len(poly_E3_1) + len(poly_E4_1)}")
-    print(f"Total constant: {const_E1_1 + const_E2_1 + const_E3_1 + const_E4_1}")
+    print("✓ Successfully constructed 9×9 QUBO (no energy evaluation)")
     print()
     
     # ========================================================================
-    # Detailed construction for Test 2 (Partially filled 4×4)
+    # Detailed Construction for Test 2
     # ========================================================================
     print("="*80)
     print("DETAILED CONSTRUCTION: Test 2 (Partially Filled 4×4)")
@@ -349,10 +311,13 @@ def run_all_tests():
     
     # Verify they're identical
     matrices_match = np.allclose(Q_reduced_ext, Q_reduced_dir)
-    offsets_match = offset_ext == offset_dir
+    offsets_match = abs(offset_ext - offset_dir) < 1e-10
     print(f"\n  Matrices identical? {matrices_match}")
     print(f"  Offsets identical? {offsets_match}")
-    print(f"  ✓ Both methods produce the same result!")
+    if matrices_match and offsets_match:
+        print(f"  ✓ Both methods produce the same result!")
+    else:
+        print(f"  ✗ Methods produced different results!")
     
     # Use the direct method for remaining tests
     Q_reduced = Q_reduced_dir
@@ -447,13 +412,38 @@ def run_all_tests():
         var = idx_to_var_red[i]
         print(f"  Reduced index {i:2d}: x{var} -> cell ({var[0]},{var[1]}), digit {var[2]+1}")
     
+    # Test reconstruction
+    print("\n" + "="*80)
+    print("Testing Solution Reconstruction")
+    print("="*80)
+    
+    # Extract just the free variable bits from the correct solution
+    reduced_bits = ""
+    idx_full = 0
+    for i in range(N2):
+        for j in range(N2):
+            for k in range(N2):
+                if (i, j, k) in var_to_idx_red:
+                    reduced_bits += bitstring2[idx_full]
+                idx_full += 1
+    
+    print(f"Original full solution: {len(bitstring2)} bits")
+    print(f"Extracted reduced solution: {len(reduced_bits)} bits")
+    
+    # Reconstruct
+    reconstructed = reconstruct_full_solution(reduced_bits, var_to_idx_red, idx_to_var_red, givens2, N2)
+    
+    print(f"Reconstructed full solution: {len(reconstructed)} bits")
+    print(f"Match: {'✓' if reconstructed == bitstring2 else '✗'}")
+    
     results4 = {
         'full_correct': energy_full_correct,
         'reduced_correct': energy_reduced_correct,
         'full_wrong': energy_full_wrong,
         'reduced_wrong': energy_reduced_wrong,
         'match': abs(energy_full_correct - energy_reduced_correct) < 0.01 and 
-                abs(energy_full_wrong - energy_reduced_wrong) < 0.01
+                abs(energy_full_wrong - energy_reduced_wrong) < 0.01 and
+                reconstructed == bitstring2
     }
     
     print()
@@ -477,6 +467,7 @@ def run_all_tests():
         print(f"  • Test 2 (Partial 4×4): Energy = {results2['total']}")
         print(f"  • Test 3 (9×9 Construction): Success")
         print(f"  • Test 4 (Reduced QUBO): Full and reduced energies match!")
+        print(f"  • Test 4 (Reconstruction): Successfully reconstructed solution")
     else:
         print("✗ SOME TESTS FAILED")
     print()
