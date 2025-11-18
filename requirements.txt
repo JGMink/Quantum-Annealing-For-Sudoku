@@ -1,0 +1,24 @@
+# Core dependencies
+numpy>=1.20.0
+
+# Optional: For Jupyter notebook
+jupyter>=1.0.0
+notebook>=6.4.0
+
+# Optional: For visualizations in notebook
+matplotlib>=3.3.0
+seaborn>=0.11.0
+
+# Optional: For quantum computing integration
+# Uncomment if using D-Wave
+# dwave-ocean-sdk>=6.0.0
+
+# Optional: For quantum computing integration
+# Uncomment if using Qiskit
+# qiskit>=0.43.0
+# qiskit-optimization>=0.5.0
+
+# Development dependencies (for contributing)
+# pytest>=7.0.0
+# black>=22.0.0
+# flake8>=4.0.0
