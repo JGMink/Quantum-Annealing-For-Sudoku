@@ -1,6 +1,8 @@
 # Sudoku QUBO: Quantum Optimization Framework
 
-**A complete framework for formulating Sudoku puzzles as Quadratic Unconstrained Binary Optimization (QUBO) problems, with variable elimination techniques for quantum and classical optimization.**
+**A complete framework for formulating Sudoku puzzles
+as Quadratic Unconstrained Binary Optimization (QUBO) problems,
+with variable elimination techniques for quantum and classical optimization.**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Tests Passing](https://img.shields.io/badge/tests-passing-brightgreen.svg)]()
@@ -24,41 +26,51 @@
 - [Contributing](#contributing)
 - [Citation](#citation)
 - [License](#license)
+- [Resources](#resources)
 
 ---
 
-## 🎯 Overview
+## Overview
 
-This project provides a complete implementation of Sudoku puzzle formulation as QUBO problems, suitable for solving on:
+This project provides a complete implementation of Sudoku puzzle formulation
+as QUBO problems, suitable for solving on:
+
 - **Quantum annealers** (D-Wave systems)
 - **Gate-based quantum computers** (variational algorithms)
 - **Classical optimization** (simulated annealing, tabu search, etc.)
 
-The framework includes **variable elimination techniques** that reduce problem size by 50-75% when given cells (clues) are present, making larger puzzles tractable on current quantum hardware.
+The framework includes **variable elimination techniques** that reduce problem size
+by 50-75% when given cells (clues) are present,
+making larger puzzles tractable on current quantum hardware.
 
 ### What is QUBO?
 
-Quadratic Unconstrained Binary Optimization (QUBO) expresses combinatorial optimization problems as:
+Quadratic Unconstrained Binary Optimization (QUBO)
+expresses combinatorial optimization problems as:
 
-```
+```text
 minimize: E(x) = x^T Q x
 ```
 
-where `x` is a binary vector and `Q` is the QUBO matrix. This formulation is native to quantum annealers and can be efficiently mapped to quantum circuits.
+where `x` is a binary vector and `Q` is the QUBO matrix.
+This formulation is native to quantum annealers
+and can be efficiently mapped to quantum circuits.
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 ### Core Functionality
+
 - ✅ **Full QUBO Construction** - Build complete QUBO matrices for any N×N Sudoku
-- ✅ **Variable Elimination** - Reduce matrix size by eliminating fixed variables from givens
+- ✅ **Variable Elimination** - Reduce matrix size by removing givens
 - ✅ **Two Reduction Methods** - Pedagogical (extraction) and efficient (direct) approaches
 - ✅ **Energy Evaluation** - Direct calculation and QUBO-based evaluation
 - ✅ **Solution Validation** - Verify constraint satisfaction
 - ✅ **Solution Reconstruction** - Convert reduced solutions back to full format
 
 ### Technical Highlights
+
 - **One-hot encoding** for natural constraint formulation
 - **Constraint adjustment** accounting for given cells
 - **Optimized matrix operations** with NumPy
@@ -66,15 +78,16 @@ where `x` is a binary vector and `Q` is the QUBO matrix. This formulation is nat
 - **Comprehensive test suite** with 4 major test cases
 
 ### Scalability
+
 - 4×4 Sudoku: 64 variables → 32 with 8 givens
 - 9×9 Sudoku: 729 variables → ~450 with 30 givens
 - Extensible to larger puzzle sizes
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
-```
+```text
 sudoku-qubo/
 ├── problem_formation_and_evaluation/
 │   ├── energy_calc/
@@ -97,34 +110,43 @@ sudoku-qubo/
 ### Module Descriptions
 
 #### `qubo_generation.py`
-Full QUBO matrix construction for Sudoku puzzles. Builds complete N³×N³ matrices including all variables (free and fixed).
+
+Full QUBO matrix construction for Sudoku puzzles.
+Builds complete N³×N³ matrices including all variables (free and fixed).
 
 **Key Functions:**
+
 - `build_sudoku_qubo()` - Complete QUBO with all four constraints
 - `build_E1()` through `build_E4()` - Individual constraint components
 - `evaluate_qubo()` - Energy calculation from bitstrings
 
 #### `matrix_reduction.py`
+
 Variable elimination techniques to reduce QUBO size by removing fixed variables.
 
 **Key Functions:**
+
 - `build_reduced_qubo()` - Extract reduced matrix (pedagogical approach)
 - `build_reduced_qubo_direct()` - Build reduced matrix directly (efficient)
 - `evaluate_reduced_qubo()` - Energy evaluation on reduced matrices
 - `reconstruct_full_solution()` - Convert reduced to full solutions
 
 #### `calc_mods.py`
+
 Direct energy calculation from Sudoku grids without QUBO matrices.
 
 **Key Functions:**
+
 - `total_energy()` - Calculate constraint violations directly
 - `is_valid_solution()` - Check if solution satisfies all constraints
 - `tensor_to_grid()` - Convert binary tensors to Sudoku grids
 
 #### `construction_test.py`
+
 Comprehensive test suite validating all functionality.
 
 **Tests:**
+
 1. Blank 4×4 Sudoku (64 variables)
 2. Partial 4×4 Sudoku (32 variables with 8 givens)
 3. 9×9 Sudoku construction (729 variables)
@@ -132,9 +154,10 @@ Comprehensive test suite validating all functionality.
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ### Prerequisites
+
 - Python 3.8 or higher
 - NumPy
 - Jupyter (optional, for notebook)
@@ -159,7 +182,7 @@ Expected output: `✓ ALL TESTS PASSED`
 
 ---
 
-## 🎯 Quick Start
+## Quick Start
 
 ### Example 1: Build Full QUBO
 
@@ -223,13 +246,13 @@ print(f"Energy: {energy}")
 
 ---
 
-## 📐 Mathematical Formulation
+## Mathematical Formulation
 
 ### Binary Variables
 
 We use **one-hot encoding**:
 
-```
+```text
 x_{i,j,k} = 1  if digit (k+1) is in cell (i,j)
           = 0  otherwise
 ```
@@ -244,29 +267,33 @@ x_{i,j,k} = 1  if digit (k+1) is in cell (i,j)
 
 The objective function minimizes constraint violations:
 
-```
+```text
 E = E₁ + E₂ + E₃ + E₄
 ```
 
 where:
 
-**E₁: Each cell has exactly one digit**
-```
+#### E₁: Each cell has exactly one digit
+
+```text
 E₁ = Σ_{i,j} [Σ_k x_{i,j,k} - 1]²
 ```
 
-**E₂: Each row has each digit exactly once**
-```
+#### E₂: Each row has each digit exactly once
+
+```text
 E₂ = Σ_{i,k} [Σ_j x_{i,j,k} - 1]²
 ```
 
-**E₃: Each column has each digit exactly once**
-```
+#### E₃: Each column has each digit exactly once
+
+```text
 E₃ = Σ_{j,k} [Σ_i x_{i,j,k} - 1]²
 ```
 
-**E₄: Each box has each digit exactly once**
-```
+#### E₄: Each box has each digit exactly once
+
+```text
 E₄ = Σ_{box,k} [Σ_{(i,j)∈box} x_{i,j,k} - 1]²
 ```
 
@@ -276,18 +303,19 @@ E₄ = Σ_{box,k} [Σ_{(i,j)∈box} x_{i,j,k} - 1]²
 
 Expanding the squared penalties gives:
 
-```
+```text
 E = x^T Q x + constant
 ```
 
 where Q is the QUBO matrix with:
+
 - **Diagonal terms:** Linear coefficients from constraint expansion
 - **Off-diagonal terms:** Quadratic interaction coefficients
 - **Constant offset:** Terms independent of x
 
 ---
 
-## 💡 Usage Examples
+## Usage Examples
 
 ### Working with Givens (Clues)
 
@@ -339,7 +367,7 @@ print(f"Valid solution: {valid}")
 
 ---
 
-## 🔬 Matrix Reduction
+## Matrix Reduction
 
 ### The Problem with Givens
 
@@ -353,6 +381,7 @@ When a Sudoku puzzle has given cells (clues), many variables are **fixed**:
 **Idea:** Build a smaller QUBO using only the **free variables**.
 
 For 4×4 with 8 givens:
+
 - **Full QUBO:** 64 variables, 64×64 matrix (4,096 entries)
 - **Reduced QUBO:** 32 variables, 32×32 matrix (1,024 entries)
 - **Savings:** 50% fewer variables, 75% smaller matrix
@@ -360,6 +389,7 @@ For 4×4 with 8 givens:
 ### Two Approaches
 
 #### 1. Extraction Method (Pedagogical)
+
 ```python
 Q_reduced, var_to_idx, idx_to_var, offset, info = build_reduced_qubo(
     N, box_size, givens
@@ -367,6 +397,7 @@ Q_reduced, var_to_idx, idx_to_var, offset, info = build_reduced_qubo(
 ```
 
 **Process:**
+
 1. Build full 64×64 QUBO
 2. Identify free variables
 3. Extract 32×32 submatrix
@@ -375,6 +406,7 @@ Q_reduced, var_to_idx, idx_to_var, offset, info = build_reduced_qubo(
 **Advantage:** Clear demonstration of the reduction process
 
 #### 2. Direct Method (Efficient)
+
 ```python
 Q_reduced, var_to_idx, idx_to_var, offset, info = build_reduced_qubo_direct(
     N, box_size, givens
@@ -382,6 +414,7 @@ Q_reduced, var_to_idx, idx_to_var, offset, info = build_reduced_qubo_direct(
 ```
 
 **Process:**
+
 1. Identify free variables upfront
 2. Build 32×32 QUBO directly
 3. Never allocate space for eliminated variables
@@ -391,6 +424,7 @@ Q_reduced, var_to_idx, idx_to_var, offset, info = build_reduced_qubo_direct(
 ### Equivalence Guarantee
 
 Both methods produce **identical** results:
+
 - Same QUBO matrix ✓
 - Same constant offset ✓
 - Same energy for any solution ✓
@@ -439,7 +473,7 @@ full_solution = reconstruct_full_solution(
 
 ---
 
-## 📊 Performance Metrics
+## Performance Metrics
 
 ### Variable Reduction
 
@@ -469,7 +503,7 @@ full_solution = reconstruct_full_solution(
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ### Run All Tests
 
@@ -480,24 +514,28 @@ python construction_test.py
 
 ### Test Coverage
 
-**Test 1: Blank 4×4 Sudoku**
+#### Test 1: Blank 4×4 Sudoku
+
 - No givens (all 64 variables free)
 - Validates basic QUBO construction
 - Tests all four constraint types
 - Expected energy: 0.0 for valid solutions
 
-**Test 2: Partial 4×4 Sudoku**
+#### Test 2: Partial 4×4 Sudoku
+
 - 8 givens (32 free variables)
 - Tests constraint adjustment for givens
 - Validates reduced variable handling
 - Expected energy: 0.0 for valid solutions
 
-**Test 3: 9×9 Sudoku Construction**
+#### Test 3: 9×9 Sudoku Construction
+
 - Validates scalability to full Sudoku
 - Matrix size: 729×729
 - Construction only (no evaluation)
 
-**Test 4: Reduced QUBO Validation**
+#### Test 4: Reduced QUBO Validation
+
 - Compares extraction vs direct methods
 - Verifies matrix equivalence
 - Tests energy preservation
@@ -505,7 +543,7 @@ python construction_test.py
 
 ### Expected Output
 
-```
+```text
 ================================================================================
 SUDOKU QUBO TEST SUITE
 ================================================================================
@@ -542,17 +580,18 @@ SUMMARY
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 ### Jupyter Notebook
 
 Interactive tutorial covering:
+
 - Problem definition and mathematical formulation
 - Step-by-step QUBO construction
 - Individual constraint components (E1-E4)
 - Full QUBO assembly
 - Solution validation
-- **Section 7a: Matrix Reduction** (NEW!)
+- **Section 7a: Matrix Reduction**
   - Variable elimination theory
   - Two-method comparison
   - Energy validation
@@ -560,17 +599,10 @@ Interactive tutorial covering:
   - Visual matrix comparisons
 
 **Launch:**
+
 ```bash
 jupyter notebook notebooks/sudoku_qubo.ipynb
 ```
-
-### Code Documentation
-
-All functions include docstrings with:
-- Purpose and mathematical background
-- Parameter descriptions
-- Return value specifications
-- Usage examples
 
 ### Module Organization
 
@@ -602,11 +634,12 @@ from problem_formation_and_evaluation.energy_calc.calc_mods import (
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Areas for enhancement:
 
 ### Potential Improvements
+
 - [ ] Additional encoding schemes (binary, domain-wall)
 - [ ] Lagrange multiplier optimization
 - [ ] Hybrid quantum-classical decomposition
@@ -619,8 +652,8 @@ Contributions are welcome! Areas for enhancement:
 
 ```bash
 # Fork and clone
-git clone https://github.com/yourusername/sudoku-qubo.git
-cd sudoku-qubo
+git clone https://github.com/JGMink/Quantum-Annealing-For-Sudoku.git
+cd Quantum-Annealing-For-Sudoku
 
 # Install development dependencies
 pip install -r requirements-dev.txt
@@ -633,72 +666,52 @@ python problem_formation_and_evaluation/QUBO_construction/construction_test.py
 
 ---
 
-## 📖 Citation
+## Citation
 
 If you use this code in your research, please cite:
 
 ```bibtex
 @misc{sudoku-qubo-2025,
   title={Sudoku QUBO: Quantum Optimization Framework with Variable Elimination},
-  author={Your Name},
+  author={Jonah Minkoff},
   year={2025},
   publisher={GitHub},
-  url={https://github.com/yourusername/sudoku-qubo}
+  url={https://github.com/JGMink/Quantum-Annealing-For-Sudoku}
 }
 ```
 
 ### Related Publications
 
-(Add references to your Overleaf reports/papers here)
+TODO: Overleaf report
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License
+-- see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🔗 Resources
+## Resources
 
 ### Quantum Computing
+
 - [D-Wave Ocean SDK](https://docs.ocean.dwavesys.com/)
 - [Qiskit Optimization](https://qiskit.org/documentation/optimization/)
 - [Amazon Braket](https://aws.amazon.com/braket/)
 
 ### QUBO Formulation
+
 - Lucas, A. (2014). "Ising formulations of many NP problems"
-- Glover, F. et al. (2019). "Quantum Bridge Analytics I: a tutorial on formulating and using QUBO models"
+- Glover, F. et al. (2019).
+"Quantum Bridge Analytics I: a tutorial on formulating and using QUBO models"
 
 ### Sudoku & Constraint Satisfaction
+
 - Sudoku as a CSP: Russell & Norvig, "Artificial Intelligence: A Modern Approach"
 - Quantum approaches: Various papers on quantum constraint satisfaction
 
 ---
 
-## 📧 Contact
-
-For questions, suggestions, or collaborations:
-- **Email:** your.email@example.com
-- **GitHub Issues:** [github.com/yourusername/sudoku-qubo/issues](https://github.com/yourusername/sudoku-qubo/issues)
-
----
-
-## 🙏 Acknowledgments
-
-- Quantum computing community for theoretical foundations
-- D-Wave Systems for quantum annealing platforms
-- NumPy developers for efficient numerical computing
-- Jupyter team for interactive computing environment
-
----
-
 **Status:** Active Development | **Version:** 1.0.0 | **Last Updated:** 2025
-
----
-
-<div align="center">
-  
-**⭐ If you find this useful, please star the repository! ⭐**
-
-</div>
